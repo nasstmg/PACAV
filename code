@@ -1,0 +1,186 @@
+//*****************************************************************************************
+//Huerto robotizado (P.A.C.A.V.)
+//Modificado por Nasser Mubarqui (Colectivo Alterius).
+//Mayo del 2019
+//Pendientes: Incluir librerias, Incluir bluethoot, resistencias en circuito SD y reloj.
+//*******************************************************************************************
+// LIBREARIAS NECESARIAS PARA LA INTERPRETACION DE LAS LECTURAS
+//*******************************************************************************************
+#include <SPI.h>                                                          //Se incluyen todas las librerias necesarias para la interpretacion de datos
+#include <SD.h>
+#include <Wire.h>
+#include <Time.h>              *Instalar libreria  Tiempo
+#include <TimeLib.h>            *Instalar libreria Tiempo
+#include <DS1307RTC.h>          *Instalar libreria DS
+#include <DHT.h>                *Instalar libreria DHT
+
+
+//**********************************************************************************************
+//Inicialización de variables Y asignación de I/O para sensores
+//**********************************************************************************************
+ #define DHTPIN 8                                                         //Definición de la entrada DIGITAL en la que se conectará el sensor de tempertatura y humedad
+ #define DHTTYPE DHT11                                                   // DHT 11  (AM2302), AM2321 *antes DHT22
+ DHT dht(DHTPIN, DHTTYPE);
+  const int pinRiego = 3;                                                //Pin digital para el  relé (relay) en el circuito p/ riego.
+  const int chipSelect = 4;                                              //Pin digital reservado para la comunicación con el shield SD. NOTA el puerto "cs" del puerto SD es el que va conectado a este pin.
+  const int pinhumedad=0; int pinluz=4;                                  //Entrada ANÁLOGA a la que se conectarán los sensores. 0= humedad en suelo; 1= luz;
+  const int lec_seca=420; int lec_agua=325;                               //Lecturas superior e inferior para el sensor de humedad en suelo
+//                                                                      // ¡son particulares para cada sensor! estas deben de sensarse a priori y ponerse en esta línea de código
+int i,ii,j;
+const int lecturas=5;       // número de mediciones que queremos hacer para obtener cada valor promedio  
+//  //********************************************* Humedad en tierra ******************************************
+    float intervalo=(lec_seca-lec_agua);      //Se supone una respuesta lineal de la resistencia del sensor con respecto a la presencia de 
+    //float ordenada=0.;                              //humedad, por lo tanto definimos una pendiente y una ordena al origen.
+//                                                    //(Una lectura de 0 debería corresponder al sensor sumergido en agua)
+//
+//   //******************************************Incialización para los promedios*****************************************
+    float Humidity_prom; float porcentaje_prom;float t_prom;float hic_prom;float luz_prom;
+    float TP_prom;
+    int hora_h;int hora_m;int hora_s;int fecha_d;int fecha_m;int fecha_a;               // Define Hora (hh:mm:ss) y Fecha (DD/MM/AAAA);
+//
+//
+//  //*******************************************Inicialización de tarjeta SD*********************************************  
+void setup() {
+     pinMode(pinRiego, OUTPUT);                        // Define SALIDA (actuador) pin del riego 
+    Serial.begin(9600);                         // Abrir la comunicacion serial y esperar hasta que esto se cumpla:
+//  while (!Serial) {
+//  }
+
+Serial.print("Inicializando tarjeta SD ...");
+   if (!SD.begin(chipSelect)) {                                // Ver si la tarjeta esta presente para inicializarla.
+    Serial.println("Error en tarjeta o Tarjeta no presente");  //Un leeeeddddddd (rojo :D) .
+    return;
+   }
+   Serial.println("Tarjeta presente y funcionando ;)"); 
+
+}   //Termina void setup
+
+//  
+  void loop() {
+  tmElements_t tm;
+//   char status;
+//   double TP,PRESION;
+//    //******************************************Incialización para los promedios*****************************************
+      Humidity_prom=0; porcentaje_prom=0; t_prom=0; hic_prom=0; luz_prom=0;TP_prom=0;  
+//    //***********************************************************************************************
+//    //Ciclo principal controlado por el número de mediciones que queremos hacer para obtener cada valor promedio
+//    //***********************************************************************************************
+//    
+    for (int i=1; i <=lecturas; i=i+1){
+        delay(3000);   //   Tiempo entre lecturas, recordar que los sensores tienen un tiempo mínimo de respuesta
+//
+//    //***************************Temperatura & Humedad relativa************************************** 
+//    //***********************************************************************************************
+//    
+//    //
+      float h = dht.readHumidity();                  //El tiempo de respuesta del DHT 22 es de unos 2 segundos por lo que ese debe ser el intervalo mínimo entre mediciones
+      float t = dht.readTemperature();              // Lee la temp en grados Celsius (default)
+        if (isnan(h) || isnan(t)) {                 // Aquí se verifica si hay error, si lo hay se indica en el monitor
+        Serial.println("Error al leer el sensor de temperatura/Humedad");   // Aqui prende un led (verde) !!!
+      return;
+      }
+      float hic = dht.computeHeatIndex(t, h, false); // Sensación térmica en Celsius (isFahreheit = false)
+
+    Serial.print("Humidity: ");Serial.print(h);Serial.print(" %\t");Serial.print("Temperatura: ");Serial.print(t);Serial.print(" *C     ");
+     Humidity_prom=Humidity_prom+h;t_prom=t_prom+t;hic_prom=hic_prom+hic;
+     delay(400);
+//     
+      //**************************Humedad*************************************************** 
+      //************************************************************************************ 
+      int humiditySensor = analogRead(pinhumedad);
+       float  porcentaje= -100.*(humiditySensor-lec_seca)/intervalo;
+      if (porcentaje>100.) porcentaje=100.;                             // Si el porcentaje de humedad es mayor que 100% por variaciones repentinas se corrige.
+      if (porcentaje<0.) porcentaje=0.;                                // Si el porcentaje de humedad es menor que 0% por variaciones repentinas se corrige.
+       if (porcentaje<20.)  digitalWrite(3, HIGH);             // *** Abre la válvula para el riego HIGH si es menor al 20%     
+       if (porcentaje>50.)  digitalWrite(3, LOW);             // *** Cierra la válvula para el riego LOW si es mayor al 500%  
+      Serial.print("H. suelo: ");Serial.print(porcentaje);Serial.print(" %          ");     
+      porcentaje_prom=porcentaje_prom+porcentaje;
+//
+    //**************************Luz********************************************************* 
+    //**************************************************************************************
+      int Sensorluz=analogRead(pinluz);
+       luz_prom=luz_prom+Sensorluz;
+       Serial.print("LUZ: ");Serial.print(Sensorluz);Serial.print("   ");
+//
+delay(600);
+ ii=i;
+ }   //TERMINA CICLO i
+// end.transmission()
+//
+//    //**************************  CALCULO DE PROMEDIOS ********************************************************** 
+//    //***********************************************************************************************************
+
+     Humidity_prom=Humidity_prom/(ii);
+     t_prom=t_prom/(ii);
+     hic_prom=hic_prom/(ii);                                       //Cálculo de promedios cada minuto con lecturas hechas cada 3 segundos
+     porcentaje_prom=porcentaje_prom/(ii);luz_prom=luz_prom/(ii);
+     delay(200);
+//     
+//    //********************* PARA CONCATENAR LOS PROMEDIOS EN UN MISMO STRING ************************************ 
+//    //***********************************************************************************************************
+
+  String dataString = " ";                           //Inicialización de la cadena de caracteres donde se imprimiran las lecturas
+  int n=11;
+     for (int ii = 1; ii <= n; ii=ii+1) {
+        if (ii=1)dataString +=String(Humidity_prom);dataString += ",";
+        if (ii=2)dataString +=String(t_prom); dataString += ",";if (ii=3)dataString +=String(hic_prom); dataString += ",";
+        if (ii=4)dataString +=String(porcentaje_prom); dataString += ",";if (ii=5)dataString +=String(luz_prom); dataString += ",";
+//
+////////    //********************* PARA CONCATENAR HORA Y FECHA  *************************************************** 
+////////    //*******************************************************************************************************
+//////      //*******************************************************************************************************
+////            
+       if (RTC.read(tm)) {          // SI EL RELOJ DA LECTURA SE PROCEDE A AGREGAR HORA Y FECHA A LA CADENA DE DATOS DEL REGISTRO (DD/MM/AAAA)
+           if (ii=10){
+               if (tm.Hour >= 0 && tm.Hour < 10)dataString += "0";                 //***
+                dataString += String(tm.Hour); dataString += ":";                    //***
+                if (tm.Minute >= 0 && tm.Minute< 10)dataString += "0";               //
+                  dataString += String(tm.Minute);dataString += ":";                 //  Esto es para concatenar en un mismo string la hora
+                 if (tm.Second >= 0 && tm.Second< 10) dataString += "0";            //***
+                  dataString += String(tm.Second);dataString += ",";                 //***
+                 }
+            if (ii=11){
+                if (tm.Day >= 0 && tm.Day < 10)dataString += "0";                    //***
+                dataString += String(tm.Day); dataString += "/";                     //   Esto concatena la fecha en un mismo string.
+                if (tm.Month >= 0 && tm.Month< 10)dataString += "0";                 //***
+                  dataString += String(tm.Month);dataString += "/";                 
+                  if (tmYearToCalendar(tm.Year) >= 0 && tmYearToCalendar(tm.Year)< 10) dataString += "0"; 
+                  dataString += String(tmYearToCalendar(tm.Year));dataString += ","; // 
+                 }
+// 
+          }            
+ Serial.println(dataString); 
+////       //*********************************************************************************************************
+////       //*********************************************************************************************************
+////       //****************************Para imprimir los datos y crear el archivo " estacion.txt " ******************  
+//    Serial.print("Cadena: ");Serial.print(" "); Serial.println(dataString);// Serial.println(" ");       // LOS DATOS SON ENVIADOS AL PUERTO SERIAL (SOLO PARA COMPROBACION DE LECTURAS)     
+
+     File  dataFile = SD.open("datos_pacal.txt", FILE_WRITE);       // APERTURA DEL ARCHIVO PARA LOS DATOS  
+       if (dataFile) {                                           // SI EL ARCHIVO ESTA DISPONIBLE, SE ESCRIBE
+        dataFile.println(dataString);
+        dataFile.close();
+         }
+      else {
+        Serial.println("Error abriendo el archivo estacion.txt");   // SI EL ARCHIVO NO ESTA DISPONIBLE,ERROR!!!! 
+          }
+////       //*********************************************************************************************************
+     }    // TERMINA CICLO ii; 
+//
+//*********************************************control bluetooth******************************************************
+ if(Serial.available()>0)
+   {     
+      char data= Serial.read(); // reading the data received from the bluetooth module
+      switch(data)
+      {
+        case 'a': digitalWrite(pinRiego, HIGH);break; // when a is pressed on the app on your smart phone
+        case 'd': digitalWrite(pinRiego, LOW);break; // when d is pressed on the app on your smart phone
+        default : break;
+      }
+      Serial.println(data);
+   }
+   delay(50);
+//
+//********************************************************************************************************************
+   }   // TERMINA void loop!!!. 
+//
+//
